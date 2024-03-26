@@ -1,11 +1,37 @@
 <template>
-  <header>
-    <h3>Wildfire Viewer</h3>
-  </header>
+  <div id="app">
+    
+    <header>
+      <div class="header-left">
+        <div class="logo">
+          <img alt="logo" src="./assets/fire-logo.png" />
+        </div>
+        <h3>{{currentCity}} Burn Severity</h3>
+      </div>
+      <div class="header-right">
+        <button @click="zoomToHouse">View Property</button>
+      </div>
+    </header>
 
-  <main>
-    <div id="cesiumContainer"></div>
-  </main>
+    <main>
+      <div id="cesiumContainer"></div>
+      <div class="controls">
+        <div class="controls-title">Selection</div>
+        <select v-model="selected">
+          <option v-for="fire in fireData" :value="fire.name" :key="fire.name">
+            {{ fire.name }}
+          </option>
+        </select>
+        <div class="controls-title">Active</div>
+        <div class="activeData" v-if="activeFire">
+          <div class="title">{{ activeFire.name}}</div>
+          <div class="description">{{ activeFire.description[0] }}</div> 
+          <div class="description">{{ activeFire.description[1] }}</div> 
+        </div>
+      </div>
+    </main>
+
+  </div>
 </template>
 
 <script>
@@ -20,35 +46,103 @@ import {
   createOsmBuildingsAsync,
   createWorldTerrainAsync,
   ImageMaterialProperty,
+  Cesium3DTileset,
   Color,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
+
+//non reactive data reference
+let data = [];
+let house;
 
 export default {
   name: 'App',
   data() {
     return {
       viewer: null,
+      currentCity: 'Oakridge', // TODO: make selection that drives data pull
+      fireTileSets: [2516132, 2517505, 2517511, 2517527, 2517530], // TODO: pull dynamically using tags
+      selected: null,
+      fireData: [], // type: { name: string, description: string, show: bool, tileset: number, dataSource: any }
+      token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1NjY4NDM5MC03YjQ5LTQyMGUtYTlmZC02M2Q3ZGVlYmRlYjEiLCJpZCI6MTcwODg5LCJpYXQiOjE3MTEyOTk5OTh9.ST3QNmGexguGSKpUtV_wvNsatQXvFanItK5AGxHa7PE'
+    }
+  },
+  computed: {
+    activeFire: {
+      get() {      
+        return this.fireData.find(fire => fire.name === this.selected);
+      }
+    }
+  },
+  watch: {
+    activeFire () {
+      let refData = data.find(fire => fire.name === this.activeFire.name);
+      this.viewer.zoomTo(refData.dataSource);
     }
   },
   methods: {
-    home() {
-      this.viewer.camera.flyTo({
-        destination: Cartesian3.fromDegrees(-122.4617, 43.7465, 25000),
-        orientation: {
-          heading: CesiumMath.toRadians(0.0),
-          pitch: CesiumMath.toRadians(-45.0),
-        },
+
+    zoomToHouse() {
+      if (!house) return;
+      this.viewer.zoomTo(house);
+    },
+
+    generateFireData() {
+      this.fireTileSets.forEach(async (tileset) => {
+
+        let fireData = {};
+        const resource = await IonResource.fromAssetId(tileset);
+        const dataSource = await KmlDataSource.load(resource, {
+          camera: this.viewer.scene.camera,
+          canvas: this.viewer.scene.canvas,
+        });
+        //hide unneeded visuals from dataset
+        var entities = dataSource.entities.values;
+        entities.forEach(entity => {
+          if (entity.name === "Pre-Fire Landsat Image" || entity.name === "Post-Fire Landsat Image") {
+            entity.show = false; // Toggle visibility based on the parameter
+          }
+          if (entity.rectangle) {
+            let image = entity.rectangle.material.image._value
+            entity.rectangle.material = new ImageMaterialProperty({
+              transparent: true,
+              image: image,
+              color: Color.WHITE.withAlpha(0.35),
+            });
+          }
+        });
+        //get metadata
+        await fetch(`https://api.cesium.com/v1/assets/${tileset}?access_token=${Ion.defaultAccessToken}`)
+          .then(response => response.json())
+          .then(data => {
+            fireData.name = data.name;
+            fireData.description = ['',''];
+            let description = data.description.split(',')
+            fireData.description[0] = description[0] ? description[0] : '';
+            fireData.description[1] = description[1] ? description[1] : '';
+          })
+          .catch(error => { console.error('Error:', error); });
+        
+        //set properties
+        fireData.show = true;
+        fireData.tileset = tileset;
+        fireData.dataSource = dataSource;
+        //push reactive reference
+        this.fireData.push(fireData);
+        //push non-reactive reference (used for zoomTo method)
+        data.push(fireData);
+        //set UI
+        this.selected = this.fireData[0].name;
+        //add to viewer
+        await this.viewer.dataSources.add(dataSource);
       });
     },
-    updateview(mode) {
-           
-    },
   },
+
   async mounted() {
 
     // Set the access token
-    Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1NjY4NDM5MC03YjQ5LTQyMGUtYTlmZC02M2Q3ZGVlYmRlYjEiLCJpZCI6MTcwODg5LCJpYXQiOjE3MTEyOTk5OTh9.ST3QNmGexguGSKpUtV_wvNsatQXvFanItK5AGxHa7PE';
+    Ion.defaultAccessToken = this.token;
 
     // initialize the viewer without default ui
     this.viewer = new Viewer("cesiumContainer", {
@@ -87,72 +181,87 @@ export default {
       await IonImageryProvider.fromAssetId(2411391),
     );
 
+    // Add home gltf model for scale / reference
+    house = this.viewer.scene.primitives.add(
+      await Cesium3DTileset.fromIonAssetId(2517636),
+    );
+
     //load fire data
-    const resource = await IonResource.fromAssetId(2516132);
-    const dataSource = await KmlDataSource.load(resource, {
-      camera: this.viewer.scene.camera,
-      canvas: this.viewer.scene.canvas,
-    });
-
-    var entities = dataSource.entities.values;
-    entities.forEach(entity => {
-      if (entity.name === "Pre-Fire Landsat Image" || entity.name === "Post-Fire Landsat Image") {
-        entity.show = false; // Toggle visibility based on the parameter
-      }
-      if (entity.rectangle) {
-        let image = entity.rectangle.material.image._value
-        entity.rectangle.material = new ImageMaterialProperty({
-          transparent: true,
-          image: image,
-          color: Color.WHITE.withAlpha(0.35),
-        });
-      }
-    });
-
-    await this.viewer.dataSources.add(dataSource);
-
-    // Fly to first fire
-    // this.viewer.camera.flyTo({
-    //   destination: Cartesian3.fromDegrees(-122.4617, 43.7465, 25000),
-    //   orientation: {
-    //     heading: CesiumMath.toRadians(0.0),
-    //     pitch: CesiumMath.toRadians(-45.0),
-    //   },
-    // });
-    
-    await this.viewer.zoomTo(dataSource);
-
-
-    //Construct the URL for the Cesium Ion API
-    const url = `https://api.cesium.com/v1/assets/${2516132}?access_token=${Ion.defaultAccessToken}`;
-    // Fetch the asset metadata
-    fetch(url)
-      .then(response => response.json())
-      .then(data => {
-        console.log('Asset Name:', data.name);
-        console.log('Asset Description:', data.description);
-        // Here, you can update your UI or take other actions with the asset's name and description
-      })
-      .catch(error => {
-        console.error('Error:', error);
-      });
+    this.generateFireData();
   }
 }
 </script>
 
 <style scoped>
+
 header {
   height: 55px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid #27272a;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+}
+
+.logo {
+  width: 35px;
+  height: 35px;
+  border-radius: 100%;
+  margin-right: 20px;
+  border: 1px solid #27272a;
+  border-radius: 10px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 5px;
+}
+.logo img {
+  width: 100%;
+  height: 100%;
 }
 
 main {
   height: calc(100vh - 55px);
   width: 100vw;
-  }
+  padding: 20px;
+  display: flex;
+  flex-direction: row;
+}
 
 #cesiumContainer {
   height: 100%;
   width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.controls {
+  width: 350px;
+  padding: 15px 15px;
+  margin-left: 20px;
+  border: 1px solid #27272a;
+  border-radius: 10px;
+}
+.controls-title {
+  font-size: 13px;
+  margin-top: 40px;
+}
+.controls-title:first-of-type {
+  margin-top: 0;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: bold;
+  margin: 5px 0;
+}
+.description {
+  margin-top: 3px;
 }
 
 </style>

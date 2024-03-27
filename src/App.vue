@@ -6,27 +6,43 @@
         <div class="logo">
           <img alt="logo" src="./assets/fire-logo.png" />
         </div>
-        <h3>{{currentCity}} Burn Severity</h3>
+        <h3>Historical Burn in <a @click="flyToCity">{{ currentCity }}</a></h3>
       </div>
       <div class="header-right">
-        <button @click="zoomToHouse">View Property</button>
+        <!-- <button @click="zoomToHouse">View Property</button> -->
       </div>
     </header>
 
     <main>
       <div id="cesiumContainer"></div>
       <div class="controls">
-        <div class="controls-title">Selection</div>
-        <select v-model="selected">
-          <option v-for="fire in fireData" :value="fire.name" :key="fire.name">
-            {{ fire.name }}
-          </option>
-        </select>
-        <div class="controls-title">Active</div>
-        <div class="activeData" v-if="activeFire">
-          <div class="title">{{ activeFire.name}}</div>
-          <div class="description">{{ activeFire.description[0] }}</div> 
-          <div class="description">{{ activeFire.description[1] }}</div> 
+        <div class="controls-segment main">
+          <div class="controls-title">View Historical Fire</div>
+          <select v-model="selected">
+            <option v-for="fire in fireData" :value="fire.name" :key="fire.name">
+              {{ fire.name }}
+            </option>
+          </select>
+          <div class="activeData" v-if="activeFire">
+            <div class="controls-title">Name</div>
+            <div class="title">{{ activeFire.name}}</div>
+            <div class="controls-title">Area Impacted</div>
+            <div class="title">{{ activeFire.description[0] }}</div> 
+            <div class="controls-title">Ignition Date</div>
+            <div class="title">{{ activeFire.description[1] }}</div> 
+          </div>
+        </div>
+
+        <div class="controls-segment">
+          <div class="controls-title">View Local Property</div>
+          <button @click="zoomToHouse">View {{currentProperty}}</button>
+        </div>
+
+        <div class="controls-segment">
+          <div class="controls-title">Burn Severity [Legend]</div>
+          <div class="legend low">Low</div>
+          <div class="legend moderate">Moderate</div>
+          <div class="legend severe">High</div>
         </div>
       </div>
     </main>
@@ -60,7 +76,8 @@ export default {
   data() {
     return {
       viewer: null,
-      currentCity: 'Oakridge', // TODO: make selection that drives data pull
+      currentCity: 'Oakridge, OR', // TODO: make dynamic selection
+      currentProperty: '76520 LaDuke Rd.', // TODO: make dynamic selection
       fireTileSets: [2516132, 2517505, 2517511, 2517527, 2517530], // TODO: pull dynamically using tags
       selected: null,
       fireData: [], // type: { name: string, description: string, show: bool, tileset: number, dataSource: any }
@@ -85,6 +102,17 @@ export default {
     zoomToHouse() {
       if (!house) return;
       this.viewer.zoomTo(house);
+    },
+
+    flyToCity() {
+      //TODO: make this dynamic with geocoder based on city selection
+      this.viewer.camera.flyTo({
+        destination: Cartesian3.fromDegrees(-122.468787,  43.718156, 5000),
+        orientation: {
+          heading: CesiumMath.toRadians(0.0),
+          pitch: CesiumMath.toRadians(-45.0),
+        },
+      });
     },
 
     generateFireData() {
@@ -118,8 +146,8 @@ export default {
             fireData.name = data.name;
             fireData.description = ['',''];
             let description = data.description.split(',')
-            fireData.description[0] = description[0] ? description[0] : '';
-            fireData.description[1] = description[1] ? description[1] : '';
+            fireData.description[0] = description[0] ? description[0].split(':')[1] : '';
+            fireData.description[1] = description[1] ? description[1].split(':')[1] : '';
           })
           .catch(error => { console.error('Error:', error); });
         
@@ -208,6 +236,16 @@ header {
   align-items: center;
 }
 
+.header-left h3 {
+  font-size: 15px;
+}
+
+.header-left a {
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: 17px;
+}
+
 .logo {
   width: 35px;
   height: 35px;
@@ -242,26 +280,65 @@ main {
 
 .controls {
   width: 350px;
-  padding: 15px 15px;
   margin-left: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+.controls-segment {
+  padding: 15px 15px;
   border: 1px solid #27272a;
   border-radius: 10px;
+  margin-bottom: 20px;
 }
+.controls-segment.main {
+  height: 100%;
+}
+.controls-segment:last-of-type {
+  margin-bottom: 0;
+}
+
 .controls-title {
   font-size: 13px;
-  margin-top: 40px;
+  margin-top: 12px;
 }
 .controls-title:first-of-type {
   margin-top: 0;
 }
 
+.activeData {
+  margin-top: 30px;
+}
+
 .title {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: bold;
-  margin: 5px 0;
 }
 .description {
   margin-top: 3px;
+}
+.legend {
+  width: 100%;
+  font-size: 13px;
+  display: flex;
+  margin-top: 3px;
+  align-items: center;
+}
+.legend::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  margin-right: 10px;
+  border-radius: 20px;
+}
+.low::before {
+  background-color: #00ffc9;
+}
+.moderate::before {
+  background-color: #fff300;
+}
+.severe::before {
+  background-color: #ff3b00;
 }
 
 </style>
